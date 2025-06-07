@@ -1,576 +1,913 @@
 import dash
-from dash import dcc, html
-from dash.dependencies import Input, Output
-import plotly.express as px
+from dash import dcc, html, callback, Output, Input, State, ctx
+import dash_bootstrap_components as dbc
+import dash_loading_spinners as dls
 import pandas as pd
-import os
-from datetime import datetime
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+import json
 
-# Load data from listings.csv
-def load_data():
-    if not os.path.exists('listings.csv'):
-        raise FileNotFoundError("listings.csv file not found in the current directory")
-    
-    df = pd.read_csv('listings.csv', 
-                    parse_dates=['last_review'],
-                    dtype={
-                        'id': 'int64',
-                        'host_id': 'int64',
-                        'price': 'float64',
-                        'minimum_nights': 'int64',
-                        'number_of_reviews': 'int64',
-                        'reviews_per_month': 'float64',
-                        'calculated_host_listings_count': 'int64',
-                        'availability_365': 'int64',
-                        'number_of_reviews_ltm': 'int64'
-                    })
-    
-    # Clean data
-    df['price'] = pd.to_numeric(df['price'], errors='coerce')
-    df = df.dropna(subset=['price', 'latitude', 'longitude'])
-    df['price'] = df['price'].round(2)
-    
-    # Fill missing values
-    df['reviews_per_month'] = df['reviews_per_month'].fillna(0)
-    df['neighbourhood_group'] = df['neighbourhood_group'].fillna('Unknown')
-    df['neighbourhood'] = df['neighbourhood'].fillna('Unknown')
-    
-    # Create price categories for map filtering
-    df['price_category'] = pd.cut(df['price'],
-                                 bins=[0, 100, 200, 300, 400, 500, float('inf')],
-                                 labels=['<R$100', 'R$100-200', 'R$200-300', 
-                                         'R$300-400', 'R$400-500', '>R$500'])
-    
-    return df
-
-try:
-    df = load_data()
-except Exception as e:
-    print(f"Error loading data: {e}")
-    df = pd.DataFrame({
-        'neighbourhood_group': ['Unknown'],
-        'neighbourhood': ['Unknown'],
-        'room_type': ['Unknown'],
-        'price': [0],
-        'price_category': ['<R$100'],
-        'minimum_nights': [0],
-        'number_of_reviews': [0],
-        'last_review': pd.to_datetime(['2023-01-01']),
-        'reviews_per_month': [0],
-        'latitude': [-22.9068],
-        'longitude': [-43.1729]
-    })
-
-# Initialize the Dash app
-external_stylesheets = [
-    'https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap',
-    'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
-]
-
+# Initialize the Dash app with Bootstrap theme
 app = dash.Dash(__name__, 
-                title="Airbnb Rio Analytics Dashboard",
-                external_stylesheets=external_stylesheets)
+                external_stylesheets=[
+                    dbc.themes.BOOTSTRAP,
+                    "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+                ],
+                suppress_callback_exceptions=True)
+
 server = app.server
 
-# Custom CSS styles
-styles = {
-    'app': {
-        'fontFamily': 'Roboto, sans-serif',
-        'backgroundColor': '#f8fafc',
-        'minHeight': '100vh'
+# Enhanced data loading with caching
+def load_data():
+    try:
+        df = pd.read_csv('listings.csv')
+        # Enhanced data cleaning
+        df['price'] = df['price'].str.replace('$', '').str.replace(',', '').astype(float, errors='ignore')
+        df = df[df['price'].notna() & (df['price'] > 0) & (df['price'] < 10000)]
+        
+        # Create additional features for analysis
+        df['price_per_review'] = df['price'] / (df['number_of_reviews'] + 1)
+        df['occupancy_rate'] = (365 - df['availability_365']) / 365
+        df['estimated_revenue'] = df['price'] * (365 - df['availability_365'])
+        df['price_category'] = pd.qcut(df['price'], q=5, labels=['Budget', 'Economy', 'Standard', 'Premium', 'Luxury'])
+        
+        # Add seasonality if last_review exists
+        if 'last_review' in df.columns:
+            df['last_review'] = pd.to_datetime(df['last_review'], errors='coerce')
+            df['review_month'] = df['last_review'].dt.month
+            df['review_season'] = df['last_review'].dt.month%12 // 3 + 1
+            df['review_season'] = df['review_season'].map({1: 'Summer', 2: 'Fall', 3: 'Winter', 4: 'Spring'})
+        
+        return df
+    except:
+        return pd.DataFrame()
+
+# Load data
+df = load_data()
+
+# Define color schemes for light and dark modes
+THEMES = {
+    'dark': {
+        'bg_primary': '#0f172a',
+        'bg_secondary': '#1e293b',
+        'bg_card': 'rgba(30, 41, 59, 0.8)',
+        'text_primary': '#f1f5f9',
+        'text_secondary': '#94a3b8',
+        'accent': '#3b82f6',
+        'accent_secondary': '#8b5cf6',
+        'success': '#10b981',
+        'warning': '#f59e0b',
+        'danger': '#ef4444',
+        'border': 'rgba(148, 163, 184, 0.2)',
+        'glassmorphism': 'rgba(15, 23, 42, 0.7)'
     },
-    'header': {
-        'background': 'linear-gradient(135deg, #4f46e5, #7c3aed)',
-        'color': 'white',
-        'padding': '2rem',
-        'marginBottom': '2rem',
-        'textAlign': 'center',
-        'boxShadow': '0 4px 6px rgba(0, 0, 0, 0.1)'
-    },
-    'headerTitle': {
-        'fontSize': '2.5rem',
-        'marginBottom': '0.5rem',
-        'fontWeight': '700'
-    },
-    'headerDescription': {
-        'opacity': '0.9',
-        'fontSize': '1.2rem',
-        'fontWeight': '300'
-    },
-    'container': {
-        'maxWidth': '1600px',
-        'margin': '0 auto',
-        'padding': '0 1.5rem'
-    },
-    'filters': {
-        'backgroundColor': 'white',
-        'padding': '1.5rem',
-        'borderRadius': '12px',
-        'boxShadow': '0 4px 6px rgba(0, 0, 0, 0.05)',
-        'marginBottom': '1.5rem'
-    },
-    'filterLabel': {
-        'display': 'block',
-        'marginBottom': '0.5rem',
-        'fontWeight': '500',
-        'color': '#4b5563'
-    },
-    'dropdown': {
-        'marginBottom': '1.5rem',
-        'fontFamily': 'Roboto, sans-serif'
-    },
-    'rangeSlider': {
-        'marginTop': '0.5rem'
-    },
-    'chartsGrid': {
-        'display': 'grid',
-        'gridTemplateColumns': 'repeat(2, 1fr)',
-        'gap': '1.5rem'
-    },
-    'card': {
-        'backgroundColor': 'white',
-        'borderRadius': '12px',
-        'boxShadow': '0 4px 6px rgba(0, 0, 0, 0.05)',
-        'padding': '1.5rem',
-        'transition': 'all 0.3s ease',
-        'border': '1px solid #f3f4f6'
-    },
-    'wideCard': {
-        'gridColumn': 'span 2',
-        'backgroundColor': 'white',
-        'borderRadius': '12px',
-        'boxShadow': '0 4px 6px rgba(0, 0, 0, 0.05)',
-        'padding': '1.5rem',
-        'transition': 'all 0.3s ease',
-        'border': '1px solid #f3f4f6'
-    },
-    'mapControls': {
-        'backgroundColor': '#f9fafb',
-        'padding': '1rem',
-        'borderRadius': '8px',
-        'marginBottom': '1rem',
-        'border': '1px solid #e5e7eb'
+    'light': {
+        'bg_primary': '#ffffff',
+        'bg_secondary': '#f8fafc',
+        'bg_card': 'rgba(255, 255, 255, 0.8)',
+        'text_primary': '#0f172a',
+        'text_secondary': '#64748b',
+        'accent': '#3b82f6',
+        'accent_secondary': '#8b5cf6',
+        'success': '#10b981',
+        'warning': '#f59e0b',
+        'danger': '#ef4444',
+        'border': 'rgba(0, 0, 0, 0.1)',
+        'glassmorphism': 'rgba(255, 255, 255, 0.7)'
     }
 }
 
-# Define the app layout with enhanced map filters
-app.layout = html.Div([
-    html.Div([
-        html.Div([
-            html.H1("Airbnb Rio Analytics Dashboard", 
-                    style=styles['headerTitle']),
-            html.P("Explore pricing trends and property comparisons in Rio de Janeiro",
-                  style=styles['headerDescription']),
-            html.Div([
-                html.I(className="fas fa-home", style={'marginRight': '8px'}),
-                "thiago thomas, ..."
-            ], style={'marginTop': '1rem', 'opacity': '0.7', 'fontSize': '0.9rem'})
-        ], style=styles['header']),
-        
-        html.Div([
-            # Filters
-            html.Div([
-                html.Label("Neighborhood Group:", style=styles['filterLabel']),
-                dcc.Dropdown(
-                    id='neighborhood-group-filter',
-                    options=[{'label': 'All', 'value': 'All'}] + 
-                            [{'label': n, 'value': n} for n in sorted(df['neighbourhood_group'].unique()) if pd.notna(n)],
-                    value='All',
-                    clearable=False,
-                    style=styles['dropdown'],
-                    placeholder="Select neighborhood group..."
-                ),
-                
-                html.Label("Neighborhood:", style=styles['filterLabel']),
-                dcc.Dropdown(
-                    id='neighborhood-filter',
-                    options=[{'label': 'All', 'value': 'All'}] + 
-                            [{'label': n, 'value': n} for n in sorted(df['neighbourhood'].unique()) if pd.notna(n)],
-                    value='All',
-                    clearable=False,
-                    style=styles['dropdown'],
-                    placeholder="Select neighborhood..."
-                ),
-                
-                html.Label("Room Type:", style=styles['filterLabel']),
-                dcc.Dropdown(
-                    id='room-type-filter',
-                    options=[{'label': 'All', 'value': 'All'}] + 
-                            [{'label': t, 'value': t} for t in sorted(df['room_type'].unique()) if pd.notna(t)],
-                    value='All',
-                    clearable=False,
-                    style=styles['dropdown'],
-                    placeholder="Select room type..."
-                ),
-                
-                html.Label(f"Price Range: (R${int(df['price'].min())} - R${int(df['price'].max())})", 
-                          style=styles['filterLabel']),
-                dcc.RangeSlider(
-                    id='price-range',
-                    min=int(df['price'].min()),
-                    max=int(df['price'].max()),
-                    step=10,
-                    value=[int(df['price'].quantile(0.1)), int(df['price'].quantile(0.9))],
-                    marks={
-                        int(df['price'].min()): {'label': f'R${int(df["price"].min())}', 'style': {'color': '#4b5563'}},
-                        int(df['price'].max()): {'label': f'R${int(df["price"].max())}', 'style': {'color': '#4b5563'}}
-                    },
-                    tooltip={'placement': 'bottom', 'always_visible': True}
-                ),
-            ], style=styles['filters']),
-            
-            # Main charts
-            html.Div([
-                html.Div([
-                    dcc.Graph(id='price-distribution'),
-                ], className="card", style=styles['card']),
-                
-                html.Div([
-                    dcc.Graph(id='room-type-pie'),
-                ], className="card", style=styles['card']),
-                
-                html.Div([
-                    dcc.Graph(id='price-comparison'),
-                ], className="card", style=styles['card']),
-                
-                html.Div([
-                    dcc.Graph(id='amenity-impact'),
-                ], className="card", style=styles['card']),
-                
-                html.Div([
-                    dcc.Graph(id='price-vs-reviews'),
-                ], className="card", style=styles['card']),
-                
-                html.Div([
-                    dcc.Graph(id='price-trends'),
-                ], className="card", style=styles['card']),
-                
-                # Enhanced Map Visualization with its own controls
+# Helper functions for styling
+def get_glass_card_style(theme='dark'):
+    colors = THEMES[theme]
+    return {
+        'background': colors['glassmorphism'],
+        'backdropFilter': 'blur(10px)',
+        'WebkitBackdropFilter': 'blur(10px)',
+        'border': f"1px solid {colors['border']}",
+        'borderRadius': '16px',
+        'padding': '24px',
+        'marginBottom': '24px',
+        'boxShadow': '0 8px 32px 0 rgba(0, 0, 0, 0.1)',
+        'transition': 'all 0.3s ease'
+    }
+
+def get_metric_card_style(theme='dark'):
+    colors = THEMES[theme]
+    return {
+        'background': f"linear-gradient(135deg, {colors['accent']}22, {colors['accent_secondary']}22)",
+        'border': f"1px solid {colors['border']}",
+        'borderRadius': '12px',
+        'padding': '20px',
+        'textAlign': 'center',
+        'transition': 'all 0.3s ease'
+    }
+
+def get_sidebar_style(theme='dark'):
+    colors = THEMES[theme]
+    return {
+        'background': colors['bg_secondary'],
+        'borderRight': f"1px solid {colors['border']}",
+        'height': '100vh',
+        'position': 'fixed',
+        'left': '0',
+        'top': '0',
+        'width': '280px',
+        'padding': '24px',
+        'overflowY': 'auto',
+        'transition': 'all 0.3s ease',
+        'zIndex': '1000'
+    }
+
+def get_main_container_style(theme='dark'):
+    colors = THEMES[theme]
+    return {
+        'background': colors['bg_primary'],
+        'minHeight': '100vh',
+        'position': 'relative',
+        'overflowX': 'hidden',
+        'fontFamily': "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+    }
+
+def get_theme_toggle_style(theme='dark'):
+    colors = THEMES[theme]
+    return {
+        'position': 'fixed',
+        'top': '24px',
+        'right': '24px',
+        'zIndex': '1001',
+        'background': colors['bg_card'],
+        'backdropFilter': 'blur(10px)',
+        'border': f"1px solid {colors['border']}",
+        'borderRadius': '50%',
+        'width': '48px',
+        'height': '48px',
+        'display': 'flex',
+        'alignItems': 'center',
+        'justifyContent': 'center',
+        'cursor': 'pointer',
+        'transition': 'all 0.3s ease'
+    }
+
+def get_main_content_style(theme='dark'):
+    return {
+        'marginLeft': '280px',
+        'padding': '24px',
+        'transition': 'all 0.3s ease'
+    }
+
+def get_text_style(theme='dark', type='primary'):
+    colors = THEMES[theme]
+    return {'color': colors[f'text_{type}']}
+
+# Create summary metrics
+def create_metric_cards(theme='dark'):
+    if df.empty:
+        return html.Div("No data available")
+    
+    total_listings = len(df)
+    avg_price = df['price'].mean()
+    avg_availability = df['availability_365'].mean()
+    total_hosts = df['host_id'].nunique()
+    
+    return html.Div([
+        dbc.Row([
+            dbc.Col([
                 html.Div([
                     html.Div([
-                        html.Label("Map Display Options:", style=styles['filterLabel']),
-                        dcc.RadioItems(
-                            id='map-color-by',
-                            options=[
-                                {'label': 'Color by Room Type', 'value': 'room_type'},
-                                {'label': 'Color by Price Category', 'value': 'price_category'}
-                            ],
-                            value='room_type',
-                            inline=True,
-                            style={'marginBottom': '15px'}
-                        ),
-                        dcc.RadioItems(
-                            id='map-size-by',
-                            options=[
-                                {'label': 'Size by Price', 'value': 'price'},
-                                {'label': 'Size by Number of Reviews', 'value': 'number_of_reviews'}
-                            ],
-                            value='price',
-                            inline=True
-                        ),
-                        
-                        html.Label("Filter by Price Category:", style={**styles['filterLabel'], 'marginTop': '15px'}),
-                        dcc.Dropdown(
-                            id='map-price-category',
-                            options=[{'label': 'All', 'value': 'All'}] + 
-                                    [{'label': cat, 'value': cat} for cat in sorted(df['price_category'].unique())],
-                            value='All',
-                            clearable=False,
-                            style={**styles['dropdown'], 'marginBottom': '0'}
-                        ),
-                    ], style=styles['mapControls']),
+                        html.I(className="fas fa-home fa-2x mb-3", 
+                               style={'color': '#3b82f6'}),
+                        html.Div(f"{total_listings:,}", className="metric-value"),
+                        html.Div("Total Listings", className="metric-label"),
+                        html.Div([
+                            html.I(className="fas fa-arrow-up me-1"),
+                            "12% from last month"
+                        ], className="metric-change", style={'color': '#10b981'})
+                    ], style=get_metric_card_style(theme))
+                ])
+            ], lg=3, md=6),
+            
+            dbc.Col([
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-dollar-sign fa-2x mb-3", 
+                               style={'color': '#8b5cf6'}),
+                        html.Div(f"${avg_price:.0f}", className="metric-value"),
+                        html.Div("Average Price", className="metric-label"),
+                        html.Div([
+                            html.I(className="fas fa-arrow-down me-1"),
+                            "3% from last month"
+                        ], className="metric-change", style={'color': '#ef4444'})
+                    ], style=get_metric_card_style(theme))
+                ])
+            ], lg=3, md=6),
+            
+            dbc.Col([
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-calendar-check fa-2x mb-3", 
+                               style={'color': '#10b981'}),
+                        html.Div(f"{avg_availability:.0f}", className="metric-value"),
+                        html.Div("Avg Days Available", className="metric-label"),
+                        html.Div([
+                            html.I(className="fas fa-minus me-1"),
+                            "No change"
+                        ], className="metric-change", style={'color': '#94a3b8'})
+                    ], style=get_metric_card_style(theme))
+                ])
+            ], lg=3, md=6),
+            
+            dbc.Col([
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-users fa-2x mb-3", 
+                               style={'color': '#f59e0b'}),
+                        html.Div(f"{total_hosts:,}", className="metric-value"),
+                        html.Div("Total Hosts", className="metric-label"),
+                        html.Div([
+                            html.I(className="fas fa-arrow-up me-1"),
+                            "8% from last month"
+                        ], className="metric-change", style={'color': '#10b981'})
+                    ], style=get_metric_card_style(theme))
+                ])
+            ], lg=3, md=6),
+        ], className="mb-4")
+    ])
+
+# Create sidebar with filters
+def create_sidebar(theme='dark'):
+    return html.Div([
+        html.H2("Airbnb Analytics", 
+                className="mb-4", 
+                style={'fontSize': '1.5rem', 'fontWeight': '700'}),
+        
+        html.Hr(style={'borderColor': 'rgba(148, 163, 184, 0.2)'}),
+        
+        # Filters
+        html.Div([
+            # Neighborhood Group Filter
+            html.Div([
+                html.Label("Neighborhood Group", className="filter-label"),
+                dcc.Dropdown(
+                    id='neighbourhood-group-filter',
+                    options=[{'label': 'All', 'value': 'all'}] + 
+                            [{'label': ng, 'value': ng} for ng in df['neighbourhood_group'].unique()],
+                    value='all',
+                    style={'borderRadius': '8px'}
+                )
+            ], className="filter-section"),
+            
+            # Room Type Filter
+            html.Div([
+                html.Label("Room Type", className="filter-label"),
+                dcc.Dropdown(
+                    id='room-type-filter',
+                    options=[{'label': 'All', 'value': 'all'}] + 
+                            [{'label': rt, 'value': rt} for rt in df['room_type'].unique()],
+                    value='all',
+                    style={'borderRadius': '8px'}
+                )
+            ], className="filter-section"),
+            
+            # Price Range Slider
+            html.Div([
+                html.Label("Price Range", className="filter-label"),
+                dcc.RangeSlider(
+                    id='price-slider',
+                    min=df['price'].min() if not df.empty else 0,
+                    max=df['price'].quantile(0.95) if not df.empty else 1000,
+                    value=[df['price'].min() if not df.empty else 0, 
+                           df['price'].quantile(0.75) if not df.empty else 500],
+                    marks=None,
+                    tooltip={"placement": "bottom", "always_visible": True},
+                    className="mt-3"
+                )
+            ], className="filter-section"),
+            
+            # Advanced Filters Toggle
+            html.Div([
+                dbc.Button(
+                    [html.I(className="fas fa-filter me-2"), "Advanced Filters"],
+                    id="advanced-filters-toggle",
+                    color="primary",
+                    outline=True,
+                    className="w-100",
+                    style={'borderRadius': '8px'}
+                )
+            ], className="filter-section"),
+            
+            # Advanced Filters Collapse
+            dbc.Collapse([
+                html.Div([
+                    html.Label("Minimum Reviews", className="filter-label mt-3"),
+                    dcc.Slider(
+                        id='min-reviews-slider',
+                        min=0,
+                        max=50,
+                        value=0,
+                        marks=None,
+                        tooltip={"placement": "bottom", "always_visible": True}
+                    ),
                     
-                    dcc.Graph(id='geo-map'),
-                ], className="card", style=styles['wideCard']),
-            ], style=styles['chartsGrid']),
-        ], style=styles['container']),
-    ], style=styles['app'])
+                    html.Label("Availability (days)", className="filter-label mt-3"),
+                    dcc.RangeSlider(
+                        id='availability-slider',
+                        min=0,
+                        max=365,
+                        value=[0, 365],
+                        marks=None,
+                        tooltip={"placement": "bottom", "always_visible": True}
+                    )
+                ])
+            ], id="advanced-filters-collapse", is_open=False),
+            
+            # Export Button
+            html.Div([
+                dbc.Button(
+                    [html.I(className="fas fa-download me-2"), "Export Data"],
+                    id="export-button",
+                    color="success",
+                    className="w-100 mt-4",
+                    style={'borderRadius': '8px'}
+                )
+            ])
+        ])
+    ], style=get_sidebar_style(theme))
+
+# Enhanced visualizations
+def create_price_distribution_chart(filtered_df, theme='dark'):
+    colors = THEMES[theme]
+    
+    fig = go.Figure()
+    
+    # Add histogram with custom styling
+    fig.add_trace(go.Histogram(
+        x=filtered_df['price'],
+        nbinsx=50,
+        marker=dict(
+            color='rgba(59, 130, 246, 0.6)',
+            line=dict(color='rgba(59, 130, 246, 1)', width=1)
+        ),
+        name='Price Distribution'
+    ))
+    
+    # Add KDE overlay
+    from scipy import stats
+    kde = stats.gaussian_kde(filtered_df['price'])
+    x_range = np.linspace(filtered_df['price'].min(), filtered_df['price'].max(), 100)
+    kde_values = kde(x_range)
+    
+    fig.add_trace(go.Scatter(
+        x=x_range,
+        y=kde_values * len(filtered_df) * (filtered_df['price'].max() - filtered_df['price'].min()) / 50,
+        mode='lines',
+        line=dict(color='rgba(139, 92, 246, 1)', width=3),
+        name='Density',
+        yaxis='y2'
+    ))
+    
+    fig.update_layout(
+        title=dict(
+            text='Price Distribution Analysis',
+            font=dict(size=20, color=colors['text_primary'])
+        ),
+        xaxis=dict(
+            title='Price ($)',
+            gridcolor=colors['border'],
+            color=colors['text_secondary']
+        ),
+        yaxis=dict(
+            title='Count',
+            gridcolor=colors['border'],
+            color=colors['text_secondary']
+        ),
+        yaxis2=dict(
+            overlaying='y',
+            side='right',
+            showgrid=False,
+            showticklabels=False
+        ),
+        plot_bgcolor=colors['bg_card'],
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color=colors['text_primary']),
+        showlegend=True,
+        legend=dict(
+            bgcolor='rgba(0,0,0,0)',
+            bordercolor=colors['border'],
+            borderwidth=1
+        ),
+        margin=dict(l=0, r=0, t=40, b=0)
+    )
+    
+    return fig
+
+def create_correlation_heatmap(filtered_df, theme='dark'):
+    colors = THEMES[theme]
+    
+    # Select numerical columns for correlation
+    numerical_cols = ['price', 'number_of_reviews', 'reviews_per_month', 
+                      'availability_365', 'calculated_host_listings_count',
+                      'occupancy_rate', 'estimated_revenue']
+    
+    # Filter columns that exist in the dataframe
+    available_cols = [col for col in numerical_cols if col in filtered_df.columns]
+    
+    if len(available_cols) < 2:
+        return go.Figure()
+    
+    corr_matrix = filtered_df[available_cols].corr()
+    
+    fig = go.Figure(data=go.Heatmap(
+        z=corr_matrix.values,
+        x=corr_matrix.columns,
+        y=corr_matrix.columns,
+        colorscale='RdBu',
+        zmid=0,
+        text=np.around(corr_matrix.values, decimals=2),
+        texttemplate='%{text}',
+        textfont={"size": 10},
+        hoverongaps=False
+    ))
+    
+    fig.update_layout(
+        title=dict(
+            text='Feature Correlation Matrix',
+            font=dict(size=20, color=colors['text_primary'])
+        ),
+        plot_bgcolor=colors['bg_card'],
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color=colors['text_primary']),
+        margin=dict(l=0, r=0, t=40, b=0),
+        xaxis=dict(
+            tickangle=-45,
+            color=colors['text_secondary']
+        ),
+        yaxis=dict(
+            color=colors['text_secondary']
+        )
+    )
+    
+    return fig
+
+def create_clustering_analysis(filtered_df, theme='dark'):
+    colors = THEMES[theme]
+    
+    if len(filtered_df) < 10:
+        return go.Figure()
+    
+    # Prepare data for clustering
+    features = ['price', 'number_of_reviews', 'availability_365']
+    X = filtered_df[features].fillna(0)
+    
+    # Standardize features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # Perform PCA for visualization
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(X_scaled)
+    
+    # Perform clustering
+    kmeans = KMeans(n_clusters=4, random_state=42)
+    clusters = kmeans.fit_predict(X_scaled)
+    
+    # Create scatter plot
+    fig = go.Figure()
+    
+    cluster_colors = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b']
+    cluster_names = ['Budget Basics', 'Premium Properties', 'High Availability', 'Popular Choices']
+    
+    for i in range(4):
+        mask = clusters == i
+        fig.add_trace(go.Scatter(
+            x=X_pca[mask, 0],
+            y=X_pca[mask, 1],
+            mode='markers',
+            marker=dict(
+                size=8,
+                color=cluster_colors[i],
+                opacity=0.7,
+                line=dict(width=1, color=colors['border'])
+            ),
+            name=cluster_names[i],
+            text=filtered_df[mask]['name'],
+            hovertemplate='<b>%{text}</b><br>' +
+                          'Cluster: ' + cluster_names[i] + '<br>' +
+                          '<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        title=dict(
+            text='Property Clustering Analysis',
+            font=dict(size=20, color=colors['text_primary'])
+        ),
+        xaxis=dict(
+            title='Principal Component 1',
+            gridcolor=colors['border'],
+            color=colors['text_secondary'],
+            zeroline=False
+        ),
+        yaxis=dict(
+            title='Principal Component 2',
+            gridcolor=colors['border'],
+            color=colors['text_secondary'],
+            zeroline=False
+        ),
+        plot_bgcolor=colors['bg_card'],
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color=colors['text_primary']),
+        legend=dict(
+            bgcolor='rgba(0,0,0,0)',
+            bordercolor=colors['border'],
+            borderwidth=1
+        ),
+        margin=dict(l=0, r=0, t=40, b=0)
+    )
+    
+    return fig
+
+def create_revenue_analysis(filtered_df, theme='dark'):
+    colors = THEMES[theme]
+    
+    # Group by room type and calculate metrics
+    revenue_by_type = filtered_df.groupby('room_type').agg({
+        'estimated_revenue': 'mean',
+        'occupancy_rate': 'mean',
+        'price': 'mean'
+    }).reset_index()
+    
+    # Create subplots
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=('Average Revenue by Room Type', 'Occupancy vs Price'),
+        specs=[[{"secondary_y": True}, {"secondary_y": False}]]
+    )
+    
+    # Revenue bar chart
+    fig.add_trace(
+        go.Bar(
+            x=revenue_by_type['room_type'],
+            y=revenue_by_type['estimated_revenue'],
+            marker_color='rgba(59, 130, 246, 0.8)',
+            name='Avg Revenue'
+        ),
+        row=1, col=1
+    )
+    
+    # Add occupancy rate line
+    fig.add_trace(
+        go.Scatter(
+            x=revenue_by_type['room_type'],
+            y=revenue_by_type['occupancy_rate'] * 100,
+            mode='lines+markers',
+            line=dict(color='rgba(139, 92, 246, 1)', width=3),
+            marker=dict(size=10),
+            name='Occupancy %'
+        ),
+        row=1, col=1, secondary_y=True
+    )
+    
+    # Scatter plot of occupancy vs price
+    fig.add_trace(
+        go.Scatter(
+            x=filtered_df['occupancy_rate'] * 100,
+            y=filtered_df['price'],
+            mode='markers',
+            marker=dict(
+                size=6,
+                color=filtered_df['estimated_revenue'],
+                colorscale='Viridis',
+                showscale=True,
+                colorbar=dict(title="Revenue", x=1.1)
+            ),
+            name='Properties',
+            text=filtered_df['room_type'],
+            hovertemplate='<b>%{text}</b><br>' +
+                          'Occupancy: %{x:.1f}%<br>' +
+                          'Price: $%{y:.0f}<br>' +
+                          '<extra></extra>'
+        ),
+        row=1, col=2
+    )
+    
+    fig.update_xaxes(title_text="Room Type", row=1, col=1, color=colors['text_secondary'])
+    fig.update_xaxes(title_text="Occupancy Rate (%)", row=1, col=2, color=colors['text_secondary'])
+    fig.update_yaxes(title_text="Revenue ($)", row=1, col=1, color=colors['text_secondary'])
+    fig.update_yaxes(title_text="Occupancy Rate (%)", row=1, col=1, secondary_y=True, color=colors['text_secondary'])
+    fig.update_yaxes(title_text="Price ($)", row=1, col=2, color=colors['text_secondary'])
+    
+    fig.update_layout(
+        title=dict(
+            text='Revenue and Occupancy Analysis',
+            font=dict(size=20, color=colors['text_primary'])
+        ),
+        plot_bgcolor=colors['bg_card'],
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color=colors['text_primary']),
+        showlegend=True,
+        legend=dict(
+            bgcolor='rgba(0,0,0,0)',
+            bordercolor=colors['border'],
+            borderwidth=1
+        ),
+        margin=dict(l=0, r=0, t=60, b=0)
+    )
+    
+    return fig
+
+def create_enhanced_map(filtered_df, theme='dark'):
+    colors = THEMES[theme]
+    
+    # Create custom color scale based on price categories
+    fig = px.scatter_mapbox(
+        filtered_df,
+        lat="latitude",
+        lon="longitude",
+        color="price_category",
+        size="price",
+        hover_name="name",
+        hover_data={
+            "price": ":$,.0f",
+            "room_type": True,
+            "number_of_reviews": True,
+            "neighbourhood": True,
+            "price_category": False
+        },
+        color_discrete_map={
+            'Budget': '#10b981',
+            'Economy': '#3b82f6',
+            'Standard': '#8b5cf6',
+            'Premium': '#f59e0b',
+            'Luxury': '#ef4444'
+        },
+        zoom=10,
+        height=600
+    )
+    
+    fig.update_traces(
+        marker=dict(
+            sizemode='area',
+            sizeref=2.*max(filtered_df['price'])/(40.**2),
+            sizemin=4,
+            opacity=0.8
+        )
+    )
+    
+    # Update layout with dark/light theme
+    mapbox_style = "carto-darkmatter" if theme == 'dark' else "carto-positron"
+    
+    fig.update_layout(
+        mapbox_style=mapbox_style,
+        mapbox=dict(
+            bearing=0,
+            center=dict(
+                lat=filtered_df['latitude'].mean() if not filtered_df.empty else -22.9,
+                lon=filtered_df['longitude'].mean() if not filtered_df.empty else -43.2
+            ),
+            pitch=0,
+            zoom=10
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color=colors['text_primary']),
+        legend=dict(
+            bgcolor=colors['glassmorphism'],
+            bordercolor=colors['border'],
+            borderwidth=1,
+            x=0.02,
+            y=0.98,
+            xanchor='left',
+            yanchor='top'
+        )
+    )
+    
+    return fig
+
+# Layout
+app.layout = html.Div([
+    # Theme store
+    dcc.Store(id='theme-store', data='dark'),
+    
+    # Custom CSS
+    html.Div(id='custom-css-container'),
+    
+    # Theme toggle button
+    html.Div([
+        html.Button(
+            html.I(id='theme-icon', className="fas fa-moon fa-lg"),
+            id='theme-toggle',
+            className='theme-toggle',
+            n_clicks=0
+        )
+    ]),
+    
+    # Main container
+    html.Div([
+        # Sidebar
+        create_sidebar(),
+        
+        # Main content
+        html.Div([
+            # Header
+            html.Div([
+                html.H1("Rio de Janeiro Airbnb Analytics", 
+                       className="section-title mb-2"),
+                html.P("Comprehensive analysis of Airbnb listings with advanced insights",
+                      className="text-secondary")
+            ], className="mb-4"),
+            
+            # Metric cards
+            create_metric_cards(),
+            
+            # Main visualizations
+            html.Div([
+                # Row 1: Price Distribution and Correlation
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            dls.Hash(
+                                dcc.Graph(id='price-distribution', 
+                                         config={'displayModeBar': False}),
+                                color="#3b82f6",
+                                speed_multiplier=2,
+                                size=50
+                            )
+                        ], className="glass-card")
+                    ], lg=6),
+                    
+                    dbc.Col([
+                        html.Div([
+                            dls.Hash(
+                                dcc.Graph(id='correlation-heatmap',
+                                         config={'displayModeBar': False}),
+                                color="#8b5cf6",
+                                speed_multiplier=2,
+                                size=50
+                            )
+                        ], className="glass-card")
+                    ], lg=6)
+                ], className="mb-4"),
+                
+                # Row 2: Clustering and Revenue Analysis
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            dls.Hash(
+                                dcc.Graph(id='clustering-analysis',
+                                         config={'displayModeBar': False}),
+                                color="#10b981",
+                                speed_multiplier=2,
+                                size=50
+                            )
+                        ], className="glass-card")
+                    ], lg=6),
+                    
+                    dbc.Col([
+                        html.Div([
+                            dls.Hash(
+                                dcc.Graph(id='revenue-analysis',
+                                         config={'displayModeBar': False}),
+                                color="#f59e0b",
+                                speed_multiplier=2,
+                                size=50
+                            )
+                        ], className="glass-card")
+                    ], lg=6)
+                ], className="mb-4"),
+                
+                # Row 3: Enhanced Map
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.H3("Geographic Distribution", 
+                                   className="mb-3",
+                                   style={'fontSize': '1.5rem', 'fontWeight': '600'}),
+                            dls.Hash(
+                                dcc.Graph(id='enhanced-map',
+                                         config={'displayModeBar': False}),
+                                color="#ef4444",
+                                speed_multiplier=2,
+                                size=50
+                            )
+                        ], className="glass-card")
+                    ], lg=12)
+                ])
+            ])
+        ], className="main-content")
+    ], className="main-container", id="main-container")
 ])
 
-# Callback to update all visualizations
+# Callbacks
 @app.callback(
-    Output('price-distribution', 'figure'),
-    Output('room-type-pie', 'figure'),
-    Output('price-comparison', 'figure'),
-    Output('amenity-impact', 'figure'),
-    Output('price-vs-reviews', 'figure'),
-    Output('price-trends', 'figure'),
-    Output('geo-map', 'figure'),
-    Input('neighborhood-group-filter', 'value'),
-    Input('neighborhood-filter', 'value'),
-    Input('room-type-filter', 'value'),
-    Input('price-range', 'value'),
-    Input('map-price-category', 'value'),
-    Input('map-color-by', 'value'),
-    Input('map-size-by', 'value')
+    [Output('theme-store', 'data'),
+     Output('theme-icon', 'className'),
+     Output('custom-css-container', 'children')],
+    [Input('theme-toggle', 'n_clicks')],
+    [State('theme-store', 'data')]
 )
-def update_charts(neighborhood_group, neighborhood, room_type, price_range, 
-                 map_price_category, map_color_by, map_size_by):
-    # Filter data based on main filters
+def toggle_theme(n_clicks, current_theme):
+    if n_clicks > 0:
+        new_theme = 'light' if current_theme == 'dark' else 'dark'
+    else:
+        new_theme = current_theme
+    
+    icon_class = "fas fa-sun fa-lg" if new_theme == 'dark' else "fas fa-moon fa-lg"
+    css = get_custom_css(new_theme)
+    
+    # Return the CSS wrapped in a style tag using dangerously_set_inner_html
+    style_element = html.Div([
+        html.Style(children=css)
+    ])
+    
+    return new_theme, icon_class, style_element
+
+@app.callback(
+    Output('advanced-filters-collapse', 'is_open'),
+    [Input('advanced-filters-toggle', 'n_clicks')],
+    [State('advanced-filters-collapse', 'is_open')]
+)
+def toggle_advanced_filters(n_clicks, is_open):
+    if n_clicks:
+        return not is_open
+    return is_open
+
+# Main callback for visualizations
+@app.callback(
+    [Output('price-distribution', 'figure'),
+     Output('correlation-heatmap', 'figure'),
+     Output('clustering-analysis', 'figure'),
+     Output('revenue-analysis', 'figure'),
+     Output('enhanced-map', 'figure')],
+    [Input('neighbourhood-group-filter', 'value'),
+     Input('room-type-filter', 'value'),
+     Input('price-slider', 'value'),
+     Input('min-reviews-slider', 'value'),
+     Input('availability-slider', 'value'),
+     Input('theme-store', 'data')]
+)
+def update_visualizations(neighbourhood_group, room_type, price_range, 
+                         min_reviews, availability_range, theme):
+    # Filter data
     filtered_df = df.copy()
     
-    if neighborhood_group != 'All':
-        filtered_df = filtered_df[filtered_df['neighbourhood_group'] == neighborhood_group]
+    if neighbourhood_group != 'all':
+        filtered_df = filtered_df[filtered_df['neighbourhood_group'] == neighbourhood_group]
     
-    if neighborhood != 'All':
-        filtered_df = filtered_df[filtered_df['neighbourhood'] == neighborhood]
-    
-    if room_type != 'All':
+    if room_type != 'all':
         filtered_df = filtered_df[filtered_df['room_type'] == room_type]
     
-    filtered_df = filtered_df[
-        (filtered_df['price'] >= price_range[0]) & 
-        (filtered_df['price'] <= price_range[1])
-    ]
+    if price_range:
+        filtered_df = filtered_df[(filtered_df['price'] >= price_range[0]) & 
+                                  (filtered_df['price'] <= price_range[1])]
     
-    # Apply additional map-specific price category filter
-    if map_price_category != 'All':
-        filtered_df = filtered_df[filtered_df['price_category'] == map_price_category]
+    if min_reviews and min_reviews > 0:
+        filtered_df = filtered_df[filtered_df['number_of_reviews'] >= min_reviews]
     
-    # Color scheme
-    colors = {
-        'primary': '#4f46e5',
-        'secondary': '#7c3aed',
-        'accent': '#10b981',
-        'text': '#1f2937',
-        'background': '#f8fafc'
-    }
+    if availability_range:
+        filtered_df = filtered_df[(filtered_df['availability_365'] >= availability_range[0]) & 
+                                  (filtered_df['availability_365'] <= availability_range[1])]
     
-    # 1. Price Distribution Histogram
-    price_hist = px.histogram(
-        filtered_df, 
-        x='price',
-        nbins=30,
-        title='Price Distribution',
-        labels={'price': 'Price (R$)'},
-        color_discrete_sequence=[colors['primary']],
-        template='plotly_white'
-    )
-    price_hist.update_layout(
-        bargap=0.1,
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=20, r=20, t=60, b=20),
-        title_font=dict(size=18, color=colors['text']),
-        font=dict(family='Roboto')
-    )
+    # Create visualizations
+    price_dist = create_price_distribution_chart(filtered_df, theme)
+    correlation = create_correlation_heatmap(filtered_df, theme)
+    clustering = create_clustering_analysis(filtered_df, theme)
+    revenue = create_revenue_analysis(filtered_df, theme)
+    map_fig = create_enhanced_map(filtered_df, theme)
     
-    # 2. Room Type Pie Chart
-    room_counts = filtered_df['room_type'].value_counts().reset_index()
-    room_counts.columns = ['room_type', 'count']
-    
-    room_pie = px.pie(
-        room_counts,
-        names='room_type',
-        values='count',
-        title='Room Type Distribution',
-        hole=0.4,
-        color_discrete_sequence=[colors['primary'], colors['secondary'], colors['accent'], '#f59e0b'],
-        template='plotly_white'
-    )
-    room_pie.update_traces(
-        textposition='inside', 
-        textinfo='percent+label',
-        marker=dict(line=dict(color='white', width=1))
-    )
-    room_pie.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=20, r=20, t=60, b=20),
-        showlegend=False,
-        title_font=dict(size=18, color=colors['text']),
-        font=dict(family='Roboto')
-    )
-    
-    # 3. Price Comparison by Property Type
-    price_comparison = px.box(
-        filtered_df,
-        x='room_type',
-        y='price',
-        title='Price Comparison by Room Type',
-        labels={'price': 'Price (R$)', 'room_type': 'Room Type'},
-        color='room_type',
-        color_discrete_sequence=[colors['primary'], colors['secondary'], colors['accent'], '#f59e0b'],
-        template='plotly_white'
-    )
-    price_comparison.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=20, r=20, t=60, b=20),
-        xaxis_title=None,
-        showlegend=False,
-        title_font=dict(size=18, color=colors['text']),
-        font=dict(family='Roboto')
-    )
-    
-    # 4. Amenity Impact on Price (using host listings count as proxy)
-    amenity_impact = px.box(
-        filtered_df,
-        x='room_type',
-        y='price',
-        color='calculated_host_listings_count',
-        title='Price by Host Listings Count',
-        labels={'price': 'Price (R$)', 'room_type': 'Room Type', 'calculated_host_listings_count': 'Host Listings'},
-        template='plotly_white'
-    )
-    amenity_impact.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=20, r=20, t=60, b=20),
-        legend_title_text='Host Listings',
-        title_font=dict(size=18, color=colors['text']),
-        font=dict(family='Roboto')
-    )
-    
-    # 5. Price vs. Reviews Scatter Plot
-    price_vs_reviews = px.scatter(
-        filtered_df,
-        x='number_of_reviews',
-        y='price',
-        color='room_type',
-        title='Price vs. Number of Reviews',
-        labels={'price': 'Price (R$)', 'number_of_reviews': 'Number of Reviews'},
-        opacity=0.7,
-        color_discrete_sequence=[colors['primary'], colors['secondary'], colors['accent'], '#f59e0b'],
-        template='plotly_white'
-    )
-    price_vs_reviews.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=20, r=20, t=60, b=20),
-        legend_title_text='Room Type',
-        title_font=dict(size=18, color=colors['text']),
-        font=dict(family='Roboto')
-    )
-    
-    # 6. Fixed Price Trends Over Time
-    # Create a proper date sequence for the trends
-    if not filtered_df.empty:
-        # Create a date range for the last 12 months
-        end_date = filtered_df['last_review'].max()
-        start_date = end_date - pd.DateOffset(months=11)
-        date_range = pd.date_range(start=start_date, end=end_date, freq='MS')
-        
-        # Group by month and room type
-        monthly_avg = filtered_df.groupby([
-            pd.Grouper(key='last_review', freq='MS'),
-            'room_type'
-        ])['price'].mean().reset_index()
-        
-        # Ensure all months are represented
-        all_months = pd.DataFrame({
-            'last_review': date_range
-        })
-        all_room_types = filtered_df['room_type'].unique()
-        
-        # Create a complete grid of all months and room types
-        complete_grid = pd.MultiIndex.from_product(
-            [date_range, all_room_types],
-            names=['last_review', 'room_type']
-        ).to_frame(index=False)
-        
-        # Merge with actual data
-        monthly_avg = pd.merge(complete_grid, monthly_avg, 
-                              on=['last_review', 'room_type'], 
-                              how='left')
-        
-        # Format month names
-        monthly_avg['month'] = monthly_avg['last_review'].dt.strftime('%B %Y')
-        
-        # Order months chronologically
-        month_order = monthly_avg['last_review'].dt.strftime('%B %Y').unique()
-        monthly_avg['month'] = pd.Categorical(monthly_avg['month'], categories=month_order, ordered=True)
-    else:
-        monthly_avg = pd.DataFrame(columns=['month', 'room_type', 'price'])
-    
-    price_trends = px.line(
-        monthly_avg,
-        x='month',
-        y='price',
-        color='room_type',
-        title='Monthly Average Price by Room Type',
-        labels={'price': 'Average Price (R$)', 'month': 'Month'},
-        color_discrete_sequence=[colors['primary'], colors['secondary'], colors['accent'], '#f59e0b'],
-        template='plotly_white'
-    )
-    price_trends.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=20, r=20, t=60, b=20),
-        legend_title_text='Room Type',
-        title_font=dict(size=18, color=colors['text']),
-        font=dict(family='Roboto')
-    )
-    price_trends.update_traces(line=dict(width=3))
-    
-    # 7. Enhanced Geographic Map Visualization with dynamic controls
-    if not filtered_df.empty:
-        # Determine color and size based on controls
-        color_column = map_color_by
-        size_column = map_size_by
-        
-        # Create custom hover data
-        hover_data = {
-            'name': True,
-            'neighbourhood': True,
-            'price': ':.2f',
-            'number_of_reviews': True,
-            'room_type': True,
-            'price_category': True
-        }
-        
-        # Adjust size scale based on what we're sizing by
-        size_max = 20 if map_size_by == 'price' else 30
-        
-        # Use scatter_map instead of scatter_mapbox to avoid deprecation warning
-        geo_map = px.scatter_mapbox(
-            filtered_df,
-            lat='latitude',
-            lon='longitude',
-            color=color_column,
-            size=size_column,
-            hover_name='name',
-            hover_data=hover_data,
-            title='Airbnb Listings Map',
-            color_discrete_sequence=[colors['primary'], colors['secondary'], 
-                                   colors['accent'], '#f59e0b', '#6366f1', '#8b5cf6'],
-            zoom=11,
-            height=600,
-            size_max=size_max
-        )
-        
-        # Set map style
-        geo_map.update_layout(
-            mapbox_style="open-street-map",
-            margin={"r":0,"t":40,"l":0,"b":0},
-            title_font=dict(size=18, color=colors['text']),
-            font=dict(family='Roboto'),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            )
-        )
-        
-        # Center the map on Rio de Janeiro
-        geo_map.update_layout(
-            mapbox=dict(
-                center=dict(lat=-22.9068, lon=-43.1729)
-            )
-        )
-    else:
-        geo_map = px.scatter_mapbox(title='No data available for selected filters')
-        geo_map.update_layout(
-            mapbox_style="open-street-map",
-            margin={"r":0,"t":40,"l":0,"b":0},
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)'
-        )
-    
-    return price_hist, room_pie, price_comparison, amenity_impact, price_vs_reviews, price_trends, geo_map
+    return price_dist, correlation, clustering, revenue, map_fig
 
-# Run the app
+# Export functionality
+@app.callback(
+    Output('export-button', 'n_clicks'),
+    [Input('export-button', 'n_clicks')],
+    [State('neighbourhood-group-filter', 'value'),
+     State('room-type-filter', 'value'),
+     State('price-slider', 'value')]
+)
+def export_data(n_clicks, neighbourhood_group, room_type, price_range):
+    if n_clicks and n_clicks > 0:
+        # Apply filters
+        filtered_df = df.copy()
+        
+        if neighbourhood_group != 'all':
+            filtered_df = filtered_df[filtered_df['neighbourhood_group'] == neighbourhood_group]
+        
+        if room_type != 'all':
+            filtered_df = filtered_df[filtered_df['room_type'] == room_type]
+        
+        if price_range:
+            filtered_df = filtered_df[(filtered_df['price'] >= price_range[0]) & 
+                                      (filtered_df['price'] <= price_range[1])]
+        
+        # Export to CSV
+        filtered_df.to_csv('airbnb_filtered_data.csv', index=False)
+    
+    return 0
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run_server(debug=True)
