@@ -394,101 +394,71 @@ if selected == "Questions Overview":
         st.markdown("### 🌍 Geographic / Spatial Questions")
         
         questions_geo = [
-            {"question": "Where are the most densely concentrated Airbnb listings in Rio?", "status": "✅ Answered", "location": "Dashboard → Geographic Distribution"},
-            {"question": "What neighborhoods have the highest average prices per night?", "status": "✅ Answered", "location": "Dashboard → Geographic Distribution"},
-            {"question": "Are there price differences between listings near the beach vs. inland?", "status": "✅ Answered", "location": "Dashboard → Price Analysis"}
+            {"question": "Where are the most densely concentrated Airbnb listings in Rio?", "status": "", "location": "Dashboard → Geographic Distribution"},
+            {"question": "What neighborhoods have the highest average prices per night?", "status": "", "location": "Dashboard → Geographic Distribution"},
+            {"question": "Are there price differences between listings near the beach vs. inland?", "status": "", "location": "Dashboard → Price Analysis"}
         ]
         
         for q in questions_geo:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.markdown(f"**{q['question']}**")
-                st.caption(f"📍 {q['location']}")
-            with col2:
-                if q['status'] == "✅ Answered":
-                    st.success(q['status'])
-                else:
-                    st.warning(q['status'])
+            st.markdown(f"**{q['question']}**")
+            st.caption(f"📍 {q['location']}")
+            st.write("")  # Space
     
     with q_tab2:
         st.markdown("### 💰 Pricing & Demand Questions")
         
         questions_price = [
-            {"question": "How do prices vary with room type?", "status": "✅ Answered", "location": "Dashboard → Price Analysis"},
-            {"question": "Is there a seasonal trend in price or availability?", "status": "✅ Answered", "location": "Dashboard → Price Analysis & Advanced Analytics"},
-            {"question": "Do hosts with more properties charge differently?", "status": "✅ Answered", "location": "Dashboard → Market Insights"}
+            {"question": "How do prices vary with room type?", "status": "", "location": "Dashboard → Price Analysis"},
+            {"question": "Is there a seasonal trend in price or availability?", "status": "", "location": "Dashboard → Price Analysis & Advanced Analytics"},
+            {"question": "Do hosts with more properties charge differently?", "status": "", "location": "Dashboard → Market Insights"}
         ]
         
         for q in questions_price:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.markdown(f"**{q['question']}**")
-                st.caption(f"📍 {q['location']}")
-            with col2:
-                if q['status'] == "✅ Answered":
-                    st.success(q['status'])
-                else:
-                    st.warning(q['status'])
+            st.markdown(f"**{q['question']}**")
+            st.caption(f"📍 {q['location']}")
+            st.write("")  # Space
     
     with q_tab3:
         st.markdown("### 🧍 Host Behavior Questions")
         
         questions_host = [
-            {"question": "What is the distribution of listings per host?", "status": "✅ Answered", "location": "Dashboard → Market Insights"},
-            {"question": "Do experienced hosts have higher occupancy rates?", "status": "✅ Answered", "location": "Dashboard → Market Insights"},
-            {"question": "How do professional hosts compare to casual hosts?", "status": "✅ Answered", "location": "Dashboard → Market Insights"}
+            {"question": "What is the distribution of listings per host?", "status": "", "location": "Dashboard → Market Insights"},
+            {"question": "Do experienced hosts have higher occupancy rates?", "status": "", "location": "Dashboard → Market Insights"},
+            {"question": "How do professional hosts compare to casual hosts?", "status": "", "location": "Dashboard → Market Insights"}
         ]
         
         for q in questions_host:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.markdown(f"**{q['question']}**")
-                st.caption(f"📍 {q['location']}")
-            with col2:
-                if q['status'] == "✅ Answered":
-                    st.success(q['status'])
-                else:
-                    st.warning(q['status'])
+            st.markdown(f"**{q['question']}**")
+            st.caption(f"📍 {q['location']}")
+            st.write("")  # Space
     
     with q_tab4:
         st.markdown("### ⭐ Ratings & Reviews Questions")
         
         questions_reviews = [
-            {"question": "How do review counts vary across neighborhoods?", "status": "✅ Answered", "location": "Dashboard → Geographic Distribution"},
-            {"question": "Is there a relationship between price and review frequency?", "status": "✅ Answered", "location": "Dashboard → ML Analysis"},
-            {"question": "Which areas have the most active listings?", "status": "✅ Answered", "location": "Dashboard → Geographic Distribution"}
+            {"question": "How do review counts vary across neighborhoods?", "status": "", "location": "Dashboard → Geographic Distribution"},
+            {"question": "Is there a relationship between price and review frequency?", "status": "", "location": "Dashboard → ML Analysis"},
+            {"question": "Which areas have the most active listings?", "status": "", "location": "Dashboard → Geographic Distribution"}
         ]
         
         for q in questions_reviews:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.markdown(f"**{q['question']}**")
-                st.caption(f"📍 {q['location']}")
-            with col2:
-                if q['status'] == "✅ Answered":
-                    st.success(q['status'])
-                else:
-                    st.warning(q['status'])
+            st.markdown(f"**{q['question']}**")
+            st.caption(f"📍 {q['location']}")
+            st.write("")  # Space
     
     with q_tab5:
         st.markdown("### 🏠 Listing Characteristics Questions")
         
         questions_listings = [
-            {"question": "What is the most common room type in Rio?", "status": "✅ Answered", "location": "Data Explorer → Categorical Summary"},
-            {"question": "Are certain types of listings more common in specific neighborhoods?", "status": "✅ Answered", "location": "Dashboard → Market Insights"},
-            {"question": "How do Airbnb listings cluster based on features?", "status": "✅ Answered", "location": "Dashboard → ML Analysis"}
+            {"question": "What is the most common room type in Rio?", "status": "", "location": "Data Explorer → Categorical Summary"},
+            {"question": "Are certain types of listings more common in specific neighborhoods?", "status": "", "location": "Dashboard → Market Insights"},
+            {"question": "How do Airbnb listings cluster based on features?", "status": "", "location": "Dashboard → ML Analysis"}
         ]
         
         for q in questions_listings:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.markdown(f"**{q['question']}**")
-                st.caption(f"📍 {q['location']}")
-            with col2:
-                if q['status'] == "✅ Answered":
-                    st.success(q['status'])
-                else:
-                    st.warning(q['status'])
+            st.markdown(f"**{q['question']}**")
+            st.caption(f"📍 {q['location']}")
+            st.write("")  # Space
     
 
 elif selected == "Dashboard":
@@ -1285,22 +1255,30 @@ elif selected == "Advanced Analytics":
         
         fig_optimal = go.Figure()
         
-        for room_type in percentiles.index:
+        # Create box plot data for each room type
+        room_types = percentiles.index.tolist()
+        colors = ['rgba(59, 130, 246, 0.6)', 'rgba(16, 185, 129, 0.6)', 'rgba(239, 68, 68, 0.6)', 'rgba(245, 101, 101, 0.6)']
+        
+        for i, room_type in enumerate(room_types):
             fig_optimal.add_trace(go.Box(
                 name=room_type,
+                x=[room_type],  # This positions the box correctly
                 q1=[percentiles.loc[room_type, 0.25]],
                 median=[percentiles.loc[room_type, 0.5]],
                 q3=[percentiles.loc[room_type, 0.75]],
                 lowerfence=[percentiles.loc[room_type, 0.25] * 0.9],
                 upperfence=[percentiles.loc[room_type, 0.75] * 1.1],
-                marker_color='rgba(59, 130, 246, 0.6)'
+                marker_color=colors[i % len(colors)],
+                boxpoints=False
             ))
         
         fig_optimal.update_layout(
             title='Optimal Price Ranges by Room Type',
+            xaxis_title='Room Type',
             yaxis_title='Price ($)',
             template='plotly_dark',
-            height=400
+            height=400,
+            showlegend=False
         )
         
         st.plotly_chart(fig_optimal, use_container_width=True)
