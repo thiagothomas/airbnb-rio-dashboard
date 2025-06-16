@@ -9,6 +9,11 @@ from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from scipy import stats
 from streamlit_option_menu import option_menu
+try:
+    from statsmodels.nonparametric.smoothers_lowess import lowess
+    LOWESS_AVAILABLE = True
+except ImportError:
+    LOWESS_AVAILABLE = False
 from streamlit_extras.metric_cards import style_metric_cards
 from streamlit_extras.dataframe_explorer import dataframe_explorer
 import base64
@@ -950,6 +955,274 @@ elif selected == "Dashboard":
         )
         
         st.plotly_chart(fig_corr, use_container_width=True)
+        
+        # Prepare data for analysis  
+        st.markdown("### 📊 Reviews vs Price Analysis")
+        
+        # Prepare data with outlier removal
+        analysis_df = filtered_df.copy()
+        analysis_df = analysis_df[analysis_df['occupancy_rate'].notna() & analysis_df['price'].notna()]
+        
+        # Remove outliers using IQR method
+        Q1_price = analysis_df['price'].quantile(0.25)
+        Q3_price = analysis_df['price'].quantile(0.75)
+        IQR_price = Q3_price - Q1_price
+        price_lower = Q1_price - 1.5 * IQR_price
+        price_upper = Q3_price + 1.5 * IQR_price
+        
+        Q1_occ = analysis_df['occupancy_rate'].quantile(0.25)
+        Q3_occ = analysis_df['occupancy_rate'].quantile(0.75)
+        IQR_occ = Q3_occ - Q1_occ
+        occ_lower = max(0, Q1_occ - 1.5 * IQR_occ)
+        occ_upper = min(1, Q3_occ + 1.5 * IQR_occ)
+        
+        # Apply outlier filtering
+        analysis_df_clean = analysis_df[
+            (analysis_df['price'] >= price_lower) & 
+            (analysis_df['price'] <= price_upper) &
+            (analysis_df['occupancy_rate'] >= occ_lower) & 
+            (analysis_df['occupancy_rate'] <= occ_upper)
+        ]
+        
+        # Occupancy (Low Availability) vs Price Analysis
+        st.markdown("### 🏨 High Occupancy vs Price Analysis")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Scatter plot: Availability vs Price
+            fig_availability = go.Figure()
+            
+            # Sample data for better performance
+            sample_size = min(2000, len(analysis_df_clean))
+            sample_df = analysis_df_clean.sample(n=sample_size, random_state=42)
+            
+            # Add scatter plot
+            fig_availability.add_trace(go.Scatter(
+                x=sample_df['availability_365'],
+                y=sample_df['price'],
+                mode='markers',
+                marker=dict(
+                    size=5,
+                    color=sample_df['occupancy_rate'] * 100,
+                    colorscale='Viridis',
+                    showscale=True,
+                    colorbar=dict(title="Occupancy %"),
+                    opacity=0.6
+                ),
+                name='Listings',
+                text=sample_df['name'],
+                hovertemplate='<b>%{text}</b><br>' +
+                              'Availability: %{x} days<br>' +
+                              'Price: $%{y:.2f}<br>' +
+                              'Occupancy: %{marker.color:.1f}%<br>' +
+                              '<extra></extra>'
+            ))
+            
+            # Add trend line
+            if len(sample_df) > 30:
+                from scipy import stats as scipy_stats
+                slope, intercept, r_value, p_value, std_err = scipy_stats.linregress(
+                    sample_df['availability_365'], sample_df['price']
+                )
+                x_trend = np.array([0, 365])
+                y_trend = slope * x_trend + intercept
+                
+                fig_availability.add_trace(go.Scatter(
+                    x=x_trend,
+                    y=y_trend,
+                    mode='lines',
+                    name=f'Trend (r={r_value:.3f})',
+                    line=dict(color='red', width=2, dash='dash')
+                ))
+            
+            fig_availability.update_layout(
+                title='Availability vs Price (Low availability = High occupancy)',
+                xaxis_title='Days Available (out of 365)',
+                yaxis_title='Price ($)',
+                height=450,
+                template='plotly_dark',
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=0.01,
+                    bgcolor="rgba(0,0,0,0.5)",
+                    bordercolor="rgba(255,255,255,0.2)",
+                    borderwidth=1
+                )
+            )
+            
+            st.plotly_chart(fig_availability, use_container_width=True)
+            
+        with col2:
+            # Occupancy bands vs average price
+            occupancy_bins = pd.cut(analysis_df_clean['occupancy_rate'], 
+                                   bins=[0, 0.2, 0.4, 0.6, 0.8, 1.0],
+                                   labels=['0-20%', '20-40%', '40-60%', '60-80%', '80-100%'])
+            
+            occupancy_price = analysis_df_clean.groupby(occupancy_bins)['price'].agg(['mean', 'median', 'count']).round(2)
+            
+            fig_occ_bars = go.Figure()
+            
+            fig_occ_bars.add_trace(go.Bar(
+                x=occupancy_price.index.astype(str),
+                y=occupancy_price['mean'],
+                name='Mean Price',
+                marker_color='rgba(59, 130, 246, 0.8)',
+                text=occupancy_price['mean'].round(0),
+                textposition='auto'
+            ))
+            
+            fig_occ_bars.add_trace(go.Bar(
+                x=occupancy_price.index.astype(str),
+                y=occupancy_price['median'],
+                name='Median Price',
+                marker_color='rgba(139, 92, 246, 0.8)',
+                text=occupancy_price['median'].round(0),
+                textposition='auto'
+            ))
+            
+            fig_occ_bars.update_layout(
+                title='Average Price by Occupancy Rate',
+                xaxis_title='Occupancy Rate',
+                yaxis_title='Price ($)',
+                height=450,
+                template='plotly_dark',
+                barmode='group'
+            )
+            
+            st.plotly_chart(fig_occ_bars, use_container_width=True)
+        
+        
+        # Price Influence on Guest Reviews Analysis
+        st.markdown("### 💬 Price Influence on Guest Reviews")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Number of reviews vs price scatter plot
+            fig_reviews_price = go.Figure()
+            
+            # Remove outliers for cleaner visualization
+            review_df = analysis_df_clean[analysis_df_clean['number_of_reviews'] > 0].copy()
+            
+            # Sample data
+            sample_size = min(2000, len(review_df))
+            sample_df = review_df.sample(n=sample_size, random_state=42)
+            
+            fig_reviews_price.add_trace(go.Scatter(
+                x=sample_df['price'],
+                y=sample_df['number_of_reviews'],
+                mode='markers',
+                marker=dict(
+                    size=5,
+                    color=sample_df['reviews_per_month'],
+                    colorscale='Blues',
+                    showscale=True,
+                    colorbar=dict(title="Reviews/Month"),
+                    opacity=0.6
+                ),
+                name='Listings',
+                text=sample_df['name'],
+                hovertemplate='<b>%{text}</b><br>' +
+                              'Price: $%{x:.2f}<br>' +
+                              'Total Reviews: %{y}<br>' +
+                              'Reviews/Month: %{marker.color:.2f}<br>' +
+                              '<extra></extra>'
+            ))
+            
+            # Add LOWESS trend if available
+            if len(sample_df) > 30 and LOWESS_AVAILABLE:
+                sorted_sample = sample_df.sort_values('price')
+                lowess_result = lowess(sorted_sample['number_of_reviews'], sorted_sample['price'], frac=0.3)
+                
+                fig_reviews_price.add_trace(go.Scatter(
+                    x=lowess_result[:, 0],
+                    y=lowess_result[:, 1],
+                    mode='lines',
+                    name='Trend (LOWESS)',
+                    line=dict(color='red', width=3)
+                ))
+            
+            fig_reviews_price.update_layout(
+                title='Price vs Number of Reviews',
+                xaxis_title='Price ($)',
+                yaxis_title='Number of Reviews',
+                height=450,
+                template='plotly_dark',
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=0.01,
+                    bgcolor="rgba(0,0,0,0.5)",
+                    bordercolor="rgba(255,255,255,0.2)",
+                    borderwidth=1
+                )
+            )
+            
+            st.plotly_chart(fig_reviews_price, use_container_width=True)
+            
+        with col2:
+            # Price categories vs review metrics
+            price_categories = pd.cut(review_df['price'], 
+                                    bins=[0, 50, 100, 200, 500, float('inf')],
+                                    labels=['$0-50', '$51-100', '$101-200', '$201-500', '$500+'])
+            
+            review_metrics = review_df.groupby(price_categories).agg({
+                'number_of_reviews': 'mean',
+                'reviews_per_month': 'mean',
+                'occupancy_rate': 'mean'
+            }).round(2)
+            
+            fig_price_reviews = go.Figure()
+            
+            # Create subplots for different metrics
+            fig_price_reviews.add_trace(go.Bar(
+                x=review_metrics.index.astype(str),
+                y=review_metrics['number_of_reviews'],
+                name='Avg Reviews',
+                marker_color='rgba(59, 130, 246, 0.8)',
+                yaxis='y',
+                offsetgroup=1
+            ))
+            
+            fig_price_reviews.add_trace(go.Bar(
+                x=review_metrics.index.astype(str),
+                y=review_metrics['reviews_per_month'] * 10,  # Scale for visibility
+                name='Reviews/Month (x10)',
+                marker_color='rgba(139, 92, 246, 0.8)',
+                yaxis='y',
+                offsetgroup=2
+            ))
+            
+            fig_price_reviews.update_layout(
+                title='Review Activity by Price Range',
+                xaxis_title='Price Range',
+                yaxis_title='Average Count',
+                height=450,
+                template='plotly_dark',
+                barmode='group'
+            )
+            
+            st.plotly_chart(fig_price_reviews, use_container_width=True)
+        
+        # Statistical insights
+        correlation_reviews = review_df['price'].corr(review_df['number_of_reviews'])
+        correlation_rpm = review_df['price'].corr(review_df['reviews_per_month'])
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Price-Reviews Correlation", f"{correlation_reviews:.3f}")
+        with col2:
+            st.metric("Price-Reviews/Month Correlation", f"{correlation_rpm:.3f}")
+        with col3:
+            # Find price sweet spot
+            if len(review_metrics) > 0:
+                sweet_spot = review_metrics['number_of_reviews'].idxmax()
+                st.metric("Most Reviewed Price Range", sweet_spot)
+        
         
         # Host experience analysis
         st.markdown("### 👥 Host Experience vs Performance")
