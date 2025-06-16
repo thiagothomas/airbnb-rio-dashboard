@@ -1,5 +1,7 @@
 # Rio de Janeiro Airbnb Analytics Dashboard
 
+https://rio-airbnb.streamlit.app/
+
 A comprehensive Streamlit-based analytics dashboard for visualizing and analyzing Airbnb listings data in Rio de Janeiro. This interactive web application provides deep insights into pricing trends, geographic distribution, market dynamics, and revenue optimization opportunities.
 
 ![Dashboard Preview](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)
