@@ -490,17 +490,6 @@ if selected == "Questions Overview":
                 else:
                     st.warning(q['status'])
     
-    # Summary metrics
-    st.markdown("---")
-    st.markdown("### 📊 Coverage Summary")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Questions", "18", delta="+3 new")
-    with col2:
-        st.metric("Questions Answered", "18", delta="100%")
-    with col3:
-        st.metric("Dashboard Sections", "5", delta="Fully covered")
 
 elif selected == "Dashboard":
     # Header
