@@ -834,6 +834,7 @@ elif selected == "Dashboard":
         
         fig_room_dist.update_xaxes(tickangle=-45)
         st.plotly_chart(fig_room_dist, use_container_width=True)
+        
     
     with tab3:
         # Market insights
@@ -1295,6 +1296,182 @@ elif selected == "Dashboard":
             )
             
             st.plotly_chart(fig_exp_rev, use_container_width=True)
+        
+        # Minimum Nights Analysis
+        st.markdown("### 🛏️ Minimum Nights & Booking Patterns Analysis")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Distribution of minimum nights
+            min_nights_dist = filtered_df['minimum_nights'].value_counts().sort_index()
+            
+            # Group into categories for better visualization
+            min_nights_categories = pd.cut(filtered_df['minimum_nights'], 
+                                         bins=[0, 1, 3, 7, 30, float('inf')],
+                                         labels=['1 night', '2-3 nights', '4-7 nights', '1-4 weeks', '1+ months'])
+            
+            min_nights_cat_dist = min_nights_categories.value_counts()
+            
+            fig_min_nights = go.Figure(data=[go.Pie(
+                labels=min_nights_cat_dist.index,
+                values=min_nights_cat_dist.values,
+                hole=0.4,
+                marker=dict(colors=['#3b82f6', '#60a5fa', '#93c5fd', '#dbeafe', '#f1f5f9'])
+            )])
+            
+            fig_min_nights.update_layout(
+                title='Distribution of Minimum Nights Requirements',
+                height=400,
+                template='plotly_dark'
+            )
+            
+            st.plotly_chart(fig_min_nights, use_container_width=True)
+        
+        with col2:
+            # Price vs minimum nights analysis
+            min_nights_price = filtered_df.groupby(min_nights_categories).agg({
+                'price': ['mean', 'median', 'count'],
+                'occupancy_rate': 'mean',
+                'estimated_revenue': 'mean'
+            }).round(2)
+            min_nights_price.columns = ['Mean Price', 'Median Price', 'Listings', 'Avg Occupancy', 'Avg Revenue']
+            
+            fig_price_min_nights = go.Figure()
+            
+            # Bar chart for average prices by minimum nights category
+            fig_price_min_nights.add_trace(go.Bar(
+                x=min_nights_price.index.astype(str),
+                y=min_nights_price['Mean Price'],
+                name='Average Price',
+                marker_color='rgba(59, 130, 246, 0.8)',
+                text=min_nights_price['Mean Price'].round(0),
+                textposition='auto',
+                yaxis='y'
+            ))
+            
+            # Line chart for occupancy rate
+            fig_price_min_nights.add_trace(go.Scatter(
+                x=min_nights_price.index.astype(str),
+                y=min_nights_price['Avg Occupancy'] * 100,
+                name='Occupancy Rate (%)',
+                mode='lines+markers',
+                marker_size=10,
+                line=dict(color='rgba(16, 185, 129, 1)', width=3),
+                yaxis='y2'
+            ))
+            
+            fig_price_min_nights.update_layout(
+                title='Price & Occupancy by Minimum Nights',
+                xaxis_title='Minimum Nights Category',
+                yaxis_title='Average Price ($)',
+                yaxis2=dict(title='Occupancy Rate (%)', overlaying='y', side='right'),
+                height=400,
+                template='plotly_dark',
+                hovermode='x unified'
+            )
+            
+            st.plotly_chart(fig_price_min_nights, use_container_width=True)
+        
+        # Guest Type Segmentation
+        st.markdown("#### 🎯 Guest Type Market Segmentation")
+        
+        # Create guest type categories
+        guest_types = pd.cut(filtered_df['minimum_nights'], 
+                           bins=[0, 1, 4, 15, 30, float('inf')],
+                           labels=['Tourist (1 night)', 'Short Stay (2-4 nights)', 
+                                 'Extended Stay (5-15 nights)', 'Monthly (16-30 nights)', 
+                                 'Long-term (30+ nights)'])
+        
+        guest_analysis = filtered_df.copy()
+        guest_analysis['guest_type'] = guest_types
+        
+        # Analyze each segment
+        segment_analysis = guest_analysis.groupby('guest_type').agg({
+            'price': 'mean',
+            'estimated_revenue': 'mean',
+            'occupancy_rate': 'mean',
+            'number_of_reviews': 'mean',
+            'id': 'count'
+        }).round(2)
+        segment_analysis.columns = ['Avg Price', 'Avg Revenue', 'Avg Occupancy', 'Avg Reviews', 'Listings Count']
+        
+        # Bubble chart for guest segments
+        fig_segments = go.Figure()
+        
+        for segment in segment_analysis.index:
+            if pd.notna(segment):  # Skip NaN values
+                fig_segments.add_trace(go.Scatter(
+                    x=[segment_analysis.loc[segment, 'Avg Price']],
+                    y=[segment_analysis.loc[segment, 'Avg Occupancy'] * 100],
+                    mode='markers+text',
+                    marker=dict(
+                        size=segment_analysis.loc[segment, 'Listings Count'] / 10,
+                        color=segment_analysis.loc[segment, 'Avg Revenue'],
+                        colorscale='Viridis',
+                        showscale=True,
+                        colorbar=dict(title="Avg Revenue"),
+                        opacity=0.7
+                    ),
+                    text=segment,
+                    textposition="top center",
+                    name=segment,
+                    hovertemplate='<b>%{text}</b><br>' +
+                                'Avg Price: $%{x:.2f}<br>' +
+                                'Occupancy: %{y:.1f}%<br>' +
+                                'Listings: ' + str(int(segment_analysis.loc[segment, 'Listings Count'])) + '<br>' +
+                                'Avg Revenue: $' + str(int(segment_analysis.loc[segment, 'Avg Revenue'])) + '<br>' +
+                                '<extra></extra>'
+                ))
+        
+        fig_segments.update_layout(
+            title='Guest Type Market Segmentation Analysis',
+            xaxis_title='Average Price ($)',
+            yaxis_title='Occupancy Rate (%)',
+            template='plotly_dark',
+            height=500,
+            showlegend=False
+        )
+        
+        st.plotly_chart(fig_segments, use_container_width=True)
+        
+        # Segment insights table
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 📊 Segment Performance Metrics")
+            # Display the segment analysis table with styling
+            segment_display = segment_analysis.copy()
+            segment_display['Avg Price'] = segment_display['Avg Price'].apply(lambda x: f"${x:.2f}")
+            segment_display['Avg Revenue'] = segment_display['Avg Revenue'].apply(lambda x: f"${x:,.0f}")
+            segment_display['Avg Occupancy'] = (segment_display['Avg Occupancy'] * 100).apply(lambda x: f"{x:.1f}%")
+            
+            st.dataframe(
+                segment_display.style.background_gradient(subset=['Listings Count'], cmap='Blues'),
+                use_container_width=True
+            )
+        
+        with col2:
+            st.markdown("#### 💡 Key Insights")
+            
+            # Calculate insights
+            best_revenue_segment = segment_analysis['Avg Revenue'].idxmax()
+            best_occupancy_segment = segment_analysis['Avg Occupancy'].idxmax()
+            largest_segment = segment_analysis['Listings Count'].idxmax()
+            
+            st.info(f"🏆 **Highest Revenue**: {best_revenue_segment}")
+            st.info(f"📈 **Best Occupancy**: {best_occupancy_segment}")  
+            st.info(f"📊 **Largest Market**: {largest_segment}")
+            
+            # Market opportunity analysis
+            total_listings = segment_analysis['Listings Count'].sum()
+            market_share = (segment_analysis['Listings Count'] / total_listings * 100).round(1)
+            
+            st.markdown("**Market Share:**")
+            for segment in market_share.index:
+                if pd.notna(segment):
+                    st.write(f"- {segment}: {market_share[segment]}%")
+        
     
     with tab4:
         # ML Analysis
@@ -1361,8 +1538,27 @@ elif selected == "Dashboard":
                 use_container_width=True
             )
             
+            # Simple cluster insights
+            st.markdown("#### 💡 Key Cluster Insights")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                best_revenue_cluster = cluster_summary['Avg Revenue'].idxmax()
+                largest_cluster = cluster_summary['Count'].idxmax()
+                
+                st.info(f"🏆 **Highest Revenue**: Cluster {best_revenue_cluster}")
+                st.info(f"📊 **Largest Segment**: Cluster {largest_cluster}")
+            
+            with col2:
+                best_occupancy_cluster = cluster_summary['Avg Occupancy'].idxmax()
+                most_expensive_cluster = cluster_summary['Avg Price'].idxmax()
+                
+                st.info(f"📈 **Best Occupancy**: Cluster {best_occupancy_cluster}")
+                st.info(f"💰 **Most Expensive**: Cluster {most_expensive_cluster}")
+            
             # Feature importance
-            st.markdown("#### 📈 PCA Feature Importance")
+            st.markdown("#### 📈 PCA Feature Importance & Insights")
             
             feature_importance = pd.DataFrame(
                 pca.components_.T,
@@ -1370,25 +1566,85 @@ elif selected == "Dashboard":
                 index=features
             )
             
-            fig_importance = go.Figure()
+            col1, col2 = st.columns(2)
             
-            for i, feature in enumerate(features):
-                fig_importance.add_trace(go.Bar(
-                    x=['PC1', 'PC2'],
-                    y=feature_importance.loc[feature],
-                    name=feature
-                ))
+            with col1:
+                fig_importance = go.Figure()
+                
+                for i, feature in enumerate(features):
+                    fig_importance.add_trace(go.Bar(
+                        x=['PC1', 'PC2'],
+                        y=feature_importance.loc[feature],
+                        name=feature
+                    ))
+                
+                fig_importance.update_layout(
+                    title='Feature Contributions to Principal Components',
+                    xaxis_title='Principal Component',
+                    yaxis_title='Contribution',
+                    template='plotly_dark',
+                    height=400,
+                    barmode='group'
+                )
+                
+                st.plotly_chart(fig_importance, use_container_width=True)
             
-            fig_importance.update_layout(
-                title='Feature Contributions to Principal Components',
-                xaxis_title='Principal Component',
-                yaxis_title='Contribution',
-                template='plotly_dark',
+            with col2:
+                # PCA Analysis and Insights
+                st.markdown("#### 💡 PCA Analysis & Interpretation")
+                
+                # Calculate explained variance
+                explained_variance = pca.explained_variance_ratio_
+                total_variance = explained_variance.sum()
+                
+                st.metric("Total Variance Explained", f"{total_variance:.1%}")
+                st.metric("PC1 Variance", f"{explained_variance[0]:.1%}")
+                st.metric("PC2 Variance", f"{explained_variance[1]:.1%}")
+                
+                st.markdown("**PCA Analysis Summary:**")
+                st.write(f"• **PC1 explains {explained_variance[0]:.1%} of variance**")
+                st.write(f"• **PC2 explains {explained_variance[1]:.1%} of variance**")
+                st.write(f"• **Total variance captured: {total_variance:.1%}**")
+            
+            # Feature correlation analysis
+            st.markdown("#### 🔗 Feature Correlation Analysis")
+            
+            correlation_matrix = filtered_df[features].corr()
+            
+            fig_corr_pca = go.Figure(data=go.Heatmap(
+                z=correlation_matrix.values,
+                x=correlation_matrix.columns,
+                y=correlation_matrix.columns,
+                colorscale='RdBu',
+                zmid=0,
+                text=np.around(correlation_matrix.values, decimals=2),
+                texttemplate='%{text}',
+                textfont={"size": 12}
+            ))
+            
+            fig_corr_pca.update_layout(
+                title='Feature Correlation Matrix (Used in PCA)',
                 height=400,
-                barmode='group'
+                template='plotly_dark'
             )
             
-            st.plotly_chart(fig_importance, use_container_width=True)
+            st.plotly_chart(fig_corr_pca, use_container_width=True)
+            
+            # Correlation insights
+            high_correlations = []
+            for i in range(len(features)):
+                for j in range(i+1, len(features)):
+                    corr_val = correlation_matrix.iloc[i, j]
+                    if abs(corr_val) > 0.5:
+                        direction = "positive" if corr_val > 0 else "negative"
+                        high_correlations.append(f"• {features[i]} & {features[j]}: {direction} correlation ({corr_val:.2f})")
+            
+            if high_correlations:
+                st.markdown("**Strong Feature Correlations:**")
+                for corr in high_correlations:
+                    st.write(corr)
+            else:
+                st.info("No strong correlations (>0.5) found between features - good for PCA!")
 
 elif selected == "Data Explorer":
     st.markdown("# 🔍 Data Explorer")
