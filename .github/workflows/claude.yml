@@ -15,7 +15,9 @@ jobs:
       pull-requests: write
       contents: write
     steps:
+    - uses: actions/checkout@v4
     - uses: anthropics/claude-code-action@beta
       with:
         anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
         github_token: ${{ secrets.GITHUB_TOKEN }}
+        base_branch: main
